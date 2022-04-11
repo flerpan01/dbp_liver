@@ -333,7 +333,23 @@ ABCDEF
 dev.off()
 
 
-
+# Figure legend
+# (A) volcanoplot, x-axis: log2 fold change, y-axis: -log10 adjusted p-value. 
+# DEG are highlighted in pink (downregultaed) and green (upregulated)
+# (B) Gene ontology, DEG correlated with gene ontology terms showing enrichment.
+# y-axis: GO terms, x-axis: number of DEGs found within the GO term, color of 
+# bars indicate the q-value
+# (C) Heatmap of DEGs, down- and upregulated genes are highlighted in pink 
+# (downregultaed) and green (upregulated) on the left side. Experimental groups 
+# are indicated in the bottom, orange (control) and darkgrey (high dose group). 
+# The individual color for each DEG represents the z-score, ranging from -2 
+# (green) to +2 (red). Z-score is a measure of the distance from the groups 
+# mean. Gene names are presented on the right side.
+# GSEA results using ontology gene sets (D) Biological processes, (E) Cellular 
+# components and (F) Molecular functions downloaded from MSigdb: 
+# http://www.gsea-msigdb.org/gsea/msigdb/index.jsp. Only the top and bottom 10 
+# most significant resutls are shown. Numbers inside the bars represent the 
+# number of genes in the leading edge
 
 
 # ========================== include phenotypes? ============================= #
