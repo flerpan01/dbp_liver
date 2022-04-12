@@ -1,18 +1,18 @@
 # 2022-03-29
 # figures for manuscript
 
-# colors: up; darkseagreen3, down; deeppink2
-
 # volcano plot
-# - DEG
-# - all genes
+# DEGs GO terms
+# Heatmap
+# GSEA GO terms
 
-# heatmap
+# colors to use: upregulated; darkseagreen3, downregulated; deeppink2
+if (Sys.info()['sysname'] == "Darwin"){
+  setwd("Dropbox/karlssonlab/projects/DBP/")
+} else {
+  setwd("F:/Dropbox/karlssonlab/projects/DBP")
+}
 
-setwd("Dropbox/karlssonlab/projects/DBP/")
-
-
-# packages
 library(dplyr)
 library(DESeq2)
 library(tximport)
@@ -23,28 +23,21 @@ library(circlize)
 library(cowplot)
 library(clusterProfiler)
 library(org.Mm.eg.db)
-#library(fgsea)
 
 # functions
-# generate a neat table for results
-make_resultstable <- function(num) {
-  name <- resultsNames(dds)[num]
-  
-  res <- results(dds, name = name, alpha = 0.05) # alpha = FDR correction
-  shr <- lfcShrink(dds, coef = num, type = "apeglm", res = res)
+## generate a neat table for results
+make_resultstable <- function(num, obj = dds) {
+  name <- resultsNames(obj)[num]
+  res <- results(obj, name = name, alpha = 0.05, lfcThreshold = 0) # alpha = FDR correction
   
   d <- data.frame(res)
-  names(d)[2] <- "lfc"
-  d$shr_lfc <- shr$log2FoldChange
   d$ensembl_gene_id <- rownames(d)
-  d$gene_name <- ens[match(d$ensembl_gene_id, ens$ensembl_gene_id), "gene_name"] %>% toupper()
+  d$gene_name <- ens[match(d$ensembl_gene_id, ens$ensembl_gene_id), "gene_name"] %>% toupper
+  
   d$sign <- "ns"
-  #d$sign[d$padj <= 0.05 & d$shr_lfc > 0] <- "up"
-  #d$sign[d$padj <= 0.05 & d$shr_lfc < 0] <- "down"
-  d$sign[d$padj <= 0.05 & d$lfc > 0] <- "up"
-  d$sign[d$padj <= 0.05 & d$lfc < 0] <- "down"
+  d$sign[d$padj <= 0.05 & d$log2FoldChange > 0] <- "up"
+  d$sign[d$padj <= 0.05 & d$log2FoldChange < 0] <- "down"
   rownames(d) <- NULL
-  d <- d[, c(1:2, 7, 3:6, 8:10)]
   
   d
 }
@@ -104,14 +97,15 @@ deg$gene_name <- ifelse(is.na(deg$gene_name), "", deg$gene_name)
 foo <- function(){
   library(ggrepel)
   ggplot() + 
-    #geom_label_repel(data = subset(DE$high_dose, sign == "down"), aes(lfc, -log10(padj), label = gene_name, fill = sign), max.overlaps = 50, size = 4, label.padding = .1, min.segment.length = 0, nudge_x = -10) +
     geom_point(data = subset(DE$high_dose, sign == "ns"), 
-               aes(lfc, -log10(padj), color = sign), size = .5) +
-    geom_hline(yintercept = -log10(.05), lty = 2, color = "navyblue", alpha = .5) +
+               aes(log2FoldChange, -log10(padj), color = sign), size = .5) +
+    geom_hline(yintercept = -log10(.05), lty = 2, color = "navyblue", 
+               alpha = .5) +
     geom_point(data = subset(DE$high_dose, sign != "ns"), 
-               aes(lfc, -log10(padj), fill = sign), shape = 21, size = 1.5) +
-    scale_color_manual(values = c("ns" = "grey40")) +
-    scale_fill_manual(values = c("up" = "darkseagreen3", "down" = "deeppink2")) +
+               aes(log2FoldChange, -log10(padj), fill = sign), shape = 21, 
+               size = 1.5) +
+    scale_color_manual(values = c("ns"="grey40")) +
+    scale_fill_manual(values = c("up"="darkseagreen3", "down"="deeppink2")) +
     theme_pubclean(base_size = 10) +
     theme(legend.position = "none", plot.title = element_text(hjust = .5)) + 
     labs(x = "log2 fold change", y = "-log10(adjusted pvalue)")
@@ -217,9 +211,10 @@ foo <- function(){
   
   # color = 'pvalue/p.adjust/qvalue'
   # x = 'GeneRatio/Count'
-  # qvalue: proportion of false discovery rate in a population of significant p-values
-  barplot(out, split = "ONTOLOGY", showCategory = 20, color = "qvalue", x = "Count") +
-    #dotplot(out, font.size = 8, showCategory = nrow(out), split = "ONTOLOGY") +
+  # qvalue: proportion of false discovery rate in a population of significant 
+  # p-values
+  barplot(out, split = "ONTOLOGY", showCategory = 20, color = "qvalue", 
+          x = "Count") +
     theme_pubr(base_size = 8) +
     theme(legend.position = "right") +
     facet_grid(ONTOLOGY ~., scales = "free", space = "free")
@@ -239,24 +234,29 @@ ranks <- res$stat
 names(ranks) <- res$symbol
 ranks <- sort(ranks, decreasing = TRUE)
 
-gsea1 <- function(ranks, go_file, pval, title, to_rm, y = "Normalised Enrichment Score"){
-  library(fgsea)
+gsea1 <- function(ranks, category, subcategory = NULL, pval = .05, to_rm = NULL,
+                  y = "Normalised Enrichment score", title){
   set.seed(54321)
-  
-  myGO <- gmtPathways(go_file)
-  
-  res <- fgsea::fgsea(pathways = myGO, 
+  #category <- "C5"
+  #subcategory <- "GO:CC"
+  species <- "Mus musculus"
+  db <- msigdbr::msigdbr(species = species, category = category, 
+                subcategory = subcategory)
+  go_list <- split(x = toupper(db$gene_symbol), 
+                   f = db$gs_name)
+
+  res <- fgsea::fgsea(pathways = go_list, 
                       stats = ranks,
                       minSize = 15,
                       maxSize = 1000,
                       nperm = 10000)
   
   # collapse pathways, reduce redundancy
-  collapsedPathways <- collapsePathways(fgseaRes = res[res$padj < .05, ],
-                                        pathways = myGO,
-                                        stats = ranks)
-  
-  mainPathways <- res[pathway %in% collapsedPathways$mainPathways][order(-NES), pathway]
+  collapsedPathways <- fgsea::collapsePathways(fgseaRes = res[res$padj < .05, ],
+                                               pathways = go_list,
+                                               stats = ranks)
+  mainPathways <- res[pathway %in% collapsedPathways$mainPathways][order(-NES), 
+                                                                   pathway]
   
   res <- res[pathway %in% mainPathways] %>% 
     as.data.frame() %>% 
@@ -264,9 +264,15 @@ gsea1 <- function(ranks, go_file, pval, title, to_rm, y = "Normalised Enrichment
     arrange(desc(NES)) %>%
     mutate_if(is.numeric, round, digits = 4)
   
-  res$pathway = stringr::str_replace(res$pathway, to_rm , "")
-  res$Enrichment = ifelse(res$NES > 0, "Up-regulated", "Down-regulated")
-  res <- rbind(head(res, n = 10), tail(res, n = 10 ))
+  if (!is.null(to_rm)) res$pathway <- stringr::str_replace(res$pathway, to_rm , 
+                                                           "")
+  res$Enrichment <- ifelse(res$NES > 0, "Up-regulated", "Down-regulated")
+  
+  print(paste0("number of pathways: ", nrow(res)))
+  
+  up <- subset(res, NES > 0)
+  down <- subset(res, NES < 0)
+  res <- rbind(head(up, n = 10), tail(down, n = 10))
   
   # trim the long names
   foo1 <- function(x, num){
@@ -283,14 +289,17 @@ gsea1 <- function(ranks, go_file, pval, title, to_rm, y = "Normalised Enrichment
   }))
   
   # colors for the plot
-  upcol <- colorRampPalette(colors = c("red4", "red1", "lightpink"))(sum(res$Enrichment == "Up-regulated"))
-  downcol <- colorRampPalette(colors = c("lightblue", "blue1", "blue4"))(sum(res$Enrichment == "Down-regulated"))
+  upcol <- colorRampPalette(colors = c("red4", "red1", 
+                                       "lightpink"))(sum(res$Enrichment == 
+                                                           "Up-regulated"))
+  downcol <- colorRampPalette(colors = c("lightblue", "blue1", 
+                                         "blue4"))(sum(res$Enrichment == 
+                                                         "Down-regulated"))
   col <- c(upcol, downcol)
   names(col) <- 1:length(col)
   
-  #labelupcol <- colorRampPalette(colors = c("white", "white", "black", "black", "black", "black"))(10)
-  labelupcol <- c(rep("white", 5), rep("black", 5))
-  labeldowncol <- rev(labelupcol)
+  labelupcol <- c(rep("white", 5), rep("black", 5))[1:length(upcol)]
+  labeldowncol <- rev(labelupcol[1:length(downcol)])
   labelcol <- c(labelupcol, labeldowncol)
   names(labelcol) <- 1:length(labelcol)
   
@@ -302,9 +311,12 @@ gsea1 <- function(ranks, go_file, pval, title, to_rm, y = "Normalised Enrichment
   
   ggplot(res, aes(reorder(pathway, NES), NES)) +
     geom_col(aes(fill = index)) + 
-    geom_text(aes(label = edge_len, y = NES * .9), color = labelcol, parse = TRUE, size = 3) + 
-    geom_text(aes(label = edge_len, y = NES * .9), color = labelcol, parse = TRUE, size = 3.05) + 
-    geom_text(aes(label = edge_len, y = NES * .9), color = labelcol, parse = TRUE, size = 3.08) + 
+    geom_text(aes(label = edge_len, y = NES * .9), 
+              color = labelcol, parse = TRUE, size = 3) + 
+    geom_text(aes(label = edge_len, y = NES * .9), 
+              color = labelcol, parse = TRUE, size = 3.05) + 
+    geom_text(aes(label = edge_len, y = NES * .9),
+              color = labelcol, parse = TRUE, size = 3.08) + 
     
     scale_fill_manual(values = col) + 
     coord_flip() + 
@@ -316,22 +328,26 @@ gsea1 <- function(ranks, go_file, pval, title, to_rm, y = "Normalised Enrichment
           axis.text.y = element_text(color = "black"),
           axis.text.x = element_text(color = "black", vjust = 0.5))
 }
+p1 <- gsea1(ranks, "C5", "GO:BP", to_rm = "GOBP_", 
+            title = "Biological Processes", y = NULL)
+p2 <- gsea1(ranks, "C5", "GO:CC", to_rm = "GOCC_", 
+            title = "Cellular Components", y = NULL)
+p3 <- gsea1(ranks, "C5", "GO:MF", to_rm = "GOMF_", 
+            title = "Molecular Functions")
 
-p1 <- gsea1(ranks, "data/databases/c5.go.bp.v7.5.1.symbols.gmt", 0.05, "Biological Process", "GOBP_", NULL)
-p2 <- gsea1(ranks, "data/databases/c5.go.cc.v7.5.1.symbols.gmt", 0.05, "Cellular Components", "GOCC_", NULL)
-p3 <- gsea1(ranks, "data/databases/c5.go.mf.v7.5.1.symbols.gmt", 0.05, "Molecular Functions", "GOMF_")
 
-# combine into 1 plot
-AB <- plot_grid(volcano_plot, go_plot, ncol = 2, rel_widths = c(.8, 1), labels = c("A", "B"))
-ht_plot <- plot_grid(NULL, deg_heatmap_plot, ncol = 2, rel_widths = c(.05, 1), labels = "C")
+# combine into one big plot
+AB <- plot_grid(volcano_plot, go_plot, ncol = 2, rel_widths = c(.8, 1), 
+                labels = c("A", "B"))
+ht_plot <- plot_grid(NULL, deg_heatmap_plot, ncol = 2, rel_widths = c(.05, 1), 
+                     labels = "C")
 ABC <- plot_grid(AB, ht_plot, nrow = 2, rel_heights = c(.6, 1))
 DEF <- plot_grid(p1, p2, p3, nrow = 3, align = "v", labels = c("D", "E", "F"))
 ABCDEF <- plot_grid(ABC, DEF, ncol = 2, rel_widths = c(1, 1))
 
-pdf("manuscript/figures/DEG4.0.pdf", width = 13, height = 9)
+pdf("manuscript/figures/DEG5.0.pdf", width = 13, height = 9)
 ABCDEF
 dev.off()
-
 
 # Figure legend
 # (A) volcanoplot, x-axis: log2 fold change, y-axis: -log10 adjusted p-value. 
@@ -350,6 +366,7 @@ dev.off()
 # http://www.gsea-msigdb.org/gsea/msigdb/index.jsp. Only the top and bottom 10 
 # most significant resutls are shown. Numbers inside the bars represent the 
 # number of genes in the leading edge
+
 
 
 # ========================== include phenotypes? ============================= #
